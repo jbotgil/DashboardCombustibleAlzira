@@ -1,0 +1,32 @@
+services:
+  # Base de datos NoSQL para el almacenamiento de documentos
+  mongo:
+    image: mongo:latest
+    container_name: mongo_db
+    restart: always
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: miPassword123
+      MONGO_INITDB_DATABASE: tienda
+    volumes:
+      - mongo_data:/data/db
+
+  # Interfaz grafica para gestionar MongoDB
+  mongo-express:
+    image: mongo-express
+    container_name: mongo_express
+    restart: always
+    ports:
+      - "8081:8081"
+    environment:
+      ME_CONFIG_MONGODB_URL: mongodb://admin:miPassword123@mongo:27017/
+      ME_CONFIG_BASICAUTH_ENABLED: true
+      ME_CONFIG_BASICAUTH_USERNAME: adminweb
+      ME_CONFIG_BASICAUTH_PASSWORD: webPass123
+    depends_on:
+      - mongo
+
+volumes:
+  mongo_data:
