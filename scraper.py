@@ -176,24 +176,21 @@ class FuelPriceScraper:
                     if not isinstance(estacion, dict):
                         continue
 
-                    # Filtrar solo estaciones de Alzira (código postal 46600)
+                    # Filtrar estaciones de la zona (Alzira, Alberic, Algemesí, Carcaixent, Xàtiva)
                     cp = str(estacion.get("C.P.", "")).strip()
                     direccion = estacion.get("Dirección", "").lower()
                     municipio = estacion.get("Municipio", "").lower()
                     localidad = estacion.get("Localidad", "").lower()
 
-                    # Verificar si es de Alzira por código postal o municipio/localidad
-                    es_alzira = (
-                        cp == "46600" or
-                        "alzira" in municipio or
-                        "alcira" in municipio or
-                        "alzira" in localidad or
-                        "alcira" in localidad or
-                        "alzira" in direccion or
-                        "alcira" in direccion
+                    # Verificar si es de la zona
+                    municipios_objetivo = ["alzira", "alcira", "alberic", "algemesí", "algemesi", "carcaixent", "xàtiva", "xativa"]
+                    es_zona = (
+                        any(m in municipio for m in municipios_objetivo) or
+                        any(m in localidad for m in municipios_objetivo) or
+                        cp in ["46600", "46260", "46680", "46740", "46800"]
                     )
 
-                    if not es_alzira:
+                    if not es_zona:
                         continue
 
                     registro = self._extraer_datos_estacion(estacion)
@@ -204,7 +201,7 @@ class FuelPriceScraper:
                     print(f"[SCRAPER] Error al procesar estación: {e}")
                     continue
 
-            print(f"[SCRAPER] {len(registros)} estaciones de Alzira procesadas")
+            print(f"[SCRAPER] {len(registros)} estaciones de la zona procesadas")
             return registros
 
         except Exception as e:
@@ -229,8 +226,8 @@ class FuelPriceScraper:
         try:
             nombre = estacion.get("Rótulo", estacion.get("Rotulo", "Desconocido"))
             direccion = estacion.get("Dirección", "Sin dirección")
-            municipio = estacion.get("Municipio", "Alzira")
-            cp = estacion.get("C.P.", "46600")
+            municipio = estacion.get("Municipio", "Desconocido")
+            cp = estacion.get("C.P.", "Desconocido")
             localidad = estacion.get("Localidad", municipio)
 
             # Obtener precios - la API usa campos descriptivos

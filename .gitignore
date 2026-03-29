@@ -56,3 +56,5 @@ Thumbs.db
 
 # MongoDB data (si se usa volumen local)
 mongodb_data/
+
+linkedinPost.txt
