@@ -4,6 +4,7 @@ Diseño moderno con análisis visual mejorado.
 """
 
 import os
+import sys
 from dotenv import load_dotenv
 import streamlit as st
 import pandas as pd
@@ -152,9 +153,58 @@ def main():
         municipio_sel = "Todos"
         mostrar_baratos = False
 
+    # Sección de gestión del scraper
+    st.sidebar.markdown("---")
+    st.sidebar.header("🤖 Gestión del Scraper")
+
+    # Botón para lanzar el scraper
+    if st.sidebar.button("🚀 Ejecutar scraper ahora", use_container_width=True, type="primary"):
+        # Comprobar si ya se ejecutó hoy
+        hoy = datetime.now().date()
+        datos_hoy = df_completo[
+            pd.to_datetime(df_completo["timestamp"]).dt.date == hoy
+        ] if not df_completo.empty else pd.DataFrame()
+
+        if not datos_hoy.empty and len(datos_hoy) > 0:
+            # Ya hay datos de hoy, preguntar confirmación
+            st.sidebar.warning(
+                f"⚠️ Ya se ejecutó el scraper hoy ({len(datos_hoy)} registros). "
+                "¿Seguro que quieres volver a ejecutar?"
+            )
+            confirmar = st.sidebar.button("✅ Sí, ejecutar de todos modos", key="confirmar_scraper")
+        else:
+            # No hay datos de hoy, ejecutar directamente
+            confirmar = True
+
+        if confirmar:
+            with st.sidebar.spinner("⏳ Ejecutando scraper..."):
+                try:
+                    import subprocess
+                    result = subprocess.run(
+                        [sys.executable, "scraper.py", "--una-vez"],
+                        capture_output=True,
+                        text=True,
+                        timeout=120
+                    )
+                    if result.returncode == 0:
+                        st.sidebar.success("✅ Scraper ejecutado correctamente")
+                        st.cache_data.clear()
+                        st.rerun()
+                    else:
+                        st.sidebar.error(f"❌ Error: {result.stderr}")
+                except subprocess.TimeoutExpired:
+                    st.sidebar.error("⏰ Timeout: El scraper tardó más de 2 minutos")
+                except Exception as e:
+                    st.sidebar.error(f"❌ Error al ejecutar: {e}")
+
+    # Botón de refresh manual
     if st.sidebar.button("🔄 Actualizar datos", use_container_width=True):
         st.cache_data.clear()
         st.rerun()
+
+    # Estado de la última actualización
+    st.sidebar.caption(f"🕐 Última: {datetime.now().strftime('%H:%M:%S')}")
+    st.sidebar.info("Auto-actualizando cada 30s", icon="🔄")
 
     # Carga de datos
     df_ultimos = get_ultimo_precio_por_gasolinera(db)
@@ -434,6 +484,9 @@ def main():
         f"Datos actualizados: {datetime.now().strftime('%d/%m/%Y %H:%M')} | "
         f"Fuente: Ministerio de Industria y Turismo"
     )
+
+    # Auto-refresh cada 30 segundos
+    st.autorun(30)
 
 
 if __name__ == "__main__":

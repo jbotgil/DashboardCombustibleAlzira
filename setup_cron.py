@@ -2,74 +2,120 @@ import os
 import sys
 from crontab import CronTab
 
-def gestionar_cron():
-    # Obtener la ruta absoluta del intérprete de python y del script
-    # Esto asegura que el cron sepa exactamente qué ejecutar
+def get_python_exe_and_script():
+    """Obtiene las rutas absolutas del intérprete y del script."""
     python_exe = sys.executable
     script_path = os.path.abspath("scraper.py")
-    
+    return python_exe, script_path
+
+def get_existing_job(cron, script_path):
+    """Busca si ya existe una tarea para este script."""
+    for job in cron:
+        if script_path in job.command:
+            return job
+    return None
+
+def create_job(cron, python_exe, script_path, schedule):
+    """Crea una nueva tarea cron."""
+    log_path = os.path.abspath("scraper_cron.log")
+    comando = f"{python_exe} {script_path} --una-vez >> {log_path} 2>&1"
+    job = cron.new(command=comando, comment='Scraper Combustible Alzira')
+    job.setall(schedule)
+    return job
+
+def show_menu():
+    """Muestra el menú de opciones."""
+    print("\n=== Configuración de Cron para Scraper ===")
+    print("1. Configurar ejecución automática (cada 24h)")
+    print("2. Configurar ejecución cada 12h")
+    print("3. Configurar ejecución cada 6h")
+    print("4. Configurar ejecución cada hora")
+    print("5. Ver tareas programadas")
+    print("6. Eliminar tarea programada")
+    print("0. Salir")
+
+def get_schedule(option):
+    """Devuelve el cron schedule según la opción seleccionada."""
+    schedules = {
+        '1': '0 8 * * *',      # Cada 24h a las 8:00
+        '2': '0 */12 * * *',   # Cada 12h
+        '3': '0 */6 * * *',    # Cada 6h
+        '4': '0 * * * *',      # Cada hora
+    }
+    return schedules.get(option)
+
+def get_schedule_description(option):
+    """Devuelve una descripción legible del schedule."""
+    descriptions = {
+        '1': 'diaria a las 8:00',
+        '2': 'cada 12 horas',
+        '3': 'cada 6 horas',
+        '4': 'cada hora',
+    }
+    return descriptions.get(option, '')
+
+def gestionar_cron():
+    python_exe, script_path = get_python_exe_and_script()
+
     if not os.path.exists(script_path):
         print(f"❌ Error: No se encuentra el archivo {script_path}")
         return
 
     cron = CronTab(user=True)
-    # Buscamos si ya existe una tarea para este script específico
-    job_existente = None
-    for job in cron:
-        if script_path in job.command:
-            job_existente = job
-            break
 
-    print("--- Gestor de Programación (Crontab) ---")
+    while True:
+        show_menu()
+        opcion = input("\nSelecciona una opción: ").strip()
 
-    if job_existente:
-        # Extraer hora y minuto actuales del cron
-        hora = job_existente.hour.render()
-        minuto = job_existente.minute.render()
-        print(f"✅ Ya tienes una tarea programada: Todos los días a las {hora}:{minuto.zfill(2)}")
-        
-        opcion = input("¿Qué deseas hacer? [C]ambiar hora, [D]esactivar/Eliminar, [S]alir: ").lower()
-        
-        if opcion == 'd':
-            cron.remove(job_existente)
-            cron.write()
-            print("🗑️ Tarea eliminada correctamente.")
-            return
-        elif opcion == 's':
-            return
-        # Si es 'c', sigue el flujo de abajo
-    else:
-        print("ℹ️ No hay ninguna programación activa para scraper.py")
-        opcion = input("¿Deseas programar una nueva tarea diaria? (s/n): ").lower()
-        if opcion != 's':
+        if opcion == '0':
+            print("👋 ¡Hasta luego!")
             return
 
-    # Configurar nueva hora
-    try:
-        print("\nConfigura la ejecución diaria:")
-        nueva_hora = int(input("Introduce la hora (0-23): "))
-        nuevo_minuto = int(input("Introduce el minuto (0-59): "))
+        if opcion == '5':
+            # Ver tareas programadas
+            print("\n--- Tareas Programadas ---")
+            jobs = list(cron)
+            if jobs:
+                for job in jobs:
+                    if script_path in job.command:
+                        print(f"  • {job.comment}: {job.schedule}")
+            else:
+                print("  No hay tareas programadas.")
+            continue
 
-        if not (0 <= nueva_hora <= 23 and 0 <= nuevo_minuto <= 59):
-            raise ValueError("Hora o minuto fuera de rango.")
+        if opcion == '6':
+            # Eliminar tarea programada
+            job_existente = get_existing_job(cron, script_path)
+            if job_existente:
+                cron.remove(job_existente)
+                cron.write()
+                print("🗑️ Tarea eliminada correctamente.")
+            else:
+                print("ℹ️ No hay ninguna tarea programada para eliminar.")
+            continue
 
-        # Si ya existía, la actualizamos. Si no, la creamos.
-        if job_existente:
-            job = job_existente
-        else:
-            # Importante: Redirigimos la salida a un log para que puedas ver si falla
-            log_path = os.path.abspath("scraper_cron.log")
-            comando = f"{python_exe} {script_path} >> {log_path} 2>&1"
-            job = cron.new(command=comando, comment='Scraper Combustible Alzira')
+        if opcion in ['1', '2', '3', '4']:
+            # Configurar nueva frecuencia
+            schedule = get_schedule(opcion)
+            description = get_schedule_description(opcion)
 
-        job.setall(f"{nuevo_minuto} {nueva_hora} * * *")
-        cron.write()
-        
-        print(f"🚀 Programado con éxito: Todos los días a las {nueva_hora}:{str(nuevo_minuto).zfill(2)}")
-        print(f"Log de errores disponible en: {os.path.abspath('scraper_cron.log')}")
+            job_existente = get_existing_job(cron, script_path)
 
-    except ValueError as e:
-        print(f"❌ Entrada no válida: {e}")
+            if job_existente:
+                # Actualizar tarea existente
+                job_existente.setall(schedule)
+                cron.write()
+                print(f"✅ Tarea actualizada: ejecución {description}")
+            else:
+                # Crear nueva tarea
+                job = create_job(cron, python_exe, script_path, schedule)
+                cron.write()
+                print(f"✅ Tarea creada: ejecución {description}")
+
+            print(f"📝 Log de errores disponible en: {os.path.abspath('scraper_cron.log')}")
+            continue
+
+        print("❌ Opción no válida. Por favor, selecciona una opción del menú.")
 
 if __name__ == "__main__":
     gestionar_cron()
