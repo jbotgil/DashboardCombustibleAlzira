@@ -486,7 +486,14 @@ def main():
     )
 
     # Auto-refresh cada 30 segundos
-    st.autorun(30)
+    if "last_refresh" not in st.session_state:
+        st.session_state.last_refresh = 0
+
+    import time
+    current_time = time.time()
+    if current_time - st.session_state.last_refresh >= 30:
+        st.session_state.last_refresh = current_time
+        st.rerun()
 
 
 if __name__ == "__main__":
