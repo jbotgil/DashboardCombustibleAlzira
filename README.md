@@ -213,6 +213,14 @@ El dashboard se abrirá automáticamente en: `http://localhost:8501`
 
 ## 📊 Características del Dashboard
 
+El dashboard proporciona una interfaz visual interactiva con actualización automática cada 30 segundos:
+
+![Dashboard Vista Principal](assets/demo1.png)
+*Vista general con métricas, comparativas y mapa de calor*
+
+![Dashboard Análisis Detallado](assets/demo2.png)
+*Análisis de relación de precios y ranking de gasolineras*
+
 1. **Métricas principales**
    - Precio medio de Gasolina 95 y Diésel B7
    - Gasolinera más barata

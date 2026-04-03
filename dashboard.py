@@ -1,6 +1,6 @@
 """
 Dashboard de Streamlit para visualizar precios de combustible en Alzira.
-Diseño moderno con análisis visual mejorado.
+Diseño moderno con análisis visual mejorado y actualización en tiempo real.
 """
 
 import os
@@ -12,6 +12,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime, timedelta, timezone
 from database_config import DatabaseConfig
+import time
 
 # 1. Cargar las variables del archivo .env
 load_dotenv()
@@ -57,9 +58,9 @@ def get_database():
     )
 
 
-@st.cache_data
+@st.cache_data(ttl=30)
 def get_todos_los_datos(_db):
-    """Obtiene todos los datos de la BD."""
+    """Obtiene todos los datos de la BD. Se actualiza cada 30s."""
     cursor = _db.collection.find().sort("timestamp", -1)
     datos = list(cursor)
     if not datos:
@@ -69,9 +70,9 @@ def get_todos_los_datos(_db):
     return df
 
 
-@st.cache_data
+@st.cache_data(ttl=30)
 def get_ultimo_precio_por_gasolinera(_db):
-    """Obtiene el último precio por gasolinera usando agregación."""
+    """Obtiene el último precio por gasolinera usando agregación. Se actualiza cada 30s."""
     pipeline = [
         {"$sort": {"timestamp": -1}},
         {"$group": {
@@ -111,128 +112,29 @@ def calcular_estadisticas(df):
     return stats
 
 
-def main():
-    # Header con estilo
-    st.title("⛽ Dashboard de Precios de Combustible")
-    st.markdown("### 📍 Área de Alzira y alrededores")
-    st.markdown("---")
-
-    # Conexión a la base de datos
-    try:
-        db = get_database()
-    except Exception as e:
-        st.error(f"❌ Error de conexión: {e}")
-        return
-
-    # Sidebar
-    st.sidebar.header("🔍 Filtros")
-
-    # Selector de combustible
-    tipo_comb = st.sidebar.radio(
-        "Tipo de combustible",
-        ["Ambos", "Gasolina 95 (E5)", "Diésel (B7)"],
-        help="Selecciona el tipo de combustible a analizar"
-    )
-
-    # Selector de municipio (si hay datos)
-    df_completo = get_todos_los_datos(db)
-
-    if not df_completo.empty:
-        # Filtrar Alberic (no hay datos relevantes)
-        df_completo = df_completo[df_completo["municipio"] != "Alberic"]
-        municipios = sorted(df_completo["municipio"].dropna().unique())
-        municipio_sel = st.sidebar.selectbox(
-            "Municipio",
-            ["Todos"] + municipios
-        )
-
-        # Selector de rango de precios
-        st.sidebar.markdown("### 📊 Rango de precios")
-        mostrar_baratos = st.sidebar.checkbox("Mostrar solo los más baratos", value=False)
-    else:
-        municipio_sel = "Todos"
-        mostrar_baratos = False
-
-    # Sección de gestión del scraper
-    st.sidebar.markdown("---")
-    st.sidebar.header("🤖 Gestión del Scraper")
-
-    # Botón para lanzar el scraper
-    if st.sidebar.button("🚀 Ejecutar scraper ahora", use_container_width=True, type="primary"):
-        # Comprobar si ya se ejecutó hoy
-        hoy = datetime.now().date()
-        datos_hoy = df_completo[
-            pd.to_datetime(df_completo["timestamp"]).dt.date == hoy
-        ] if not df_completo.empty else pd.DataFrame()
-
-        if not datos_hoy.empty and len(datos_hoy) > 0:
-            # Ya hay datos de hoy, preguntar confirmación
-            st.sidebar.warning(
-                f"⚠️ Ya se ejecutó el scraper hoy ({len(datos_hoy)} registros). "
-                "¿Seguro que quieres volver a ejecutar?"
-            )
-            confirmar = st.sidebar.button("✅ Sí, ejecutar de todos modos", key="confirmar_scraper")
-        else:
-            # No hay datos de hoy, ejecutar directamente
-            confirmar = True
-
-        if confirmar:
-            with st.sidebar.spinner("⏳ Ejecutando scraper..."):
-                try:
-                    import subprocess
-                    result = subprocess.run(
-                        [sys.executable, "scraper.py", "--una-vez"],
-                        capture_output=True,
-                        text=True,
-                        timeout=120
-                    )
-                    if result.returncode == 0:
-                        st.sidebar.success("✅ Scraper ejecutado correctamente")
-                        st.cache_data.clear()
-                        st.rerun()
-                    else:
-                        st.sidebar.error(f"❌ Error: {result.stderr}")
-                except subprocess.TimeoutExpired:
-                    st.sidebar.error("⏰ Timeout: El scraper tardó más de 2 minutos")
-                except Exception as e:
-                    st.sidebar.error(f"❌ Error al ejecutar: {e}")
-
-    # Botón de refresh manual
-    if st.sidebar.button("🔄 Actualizar datos", use_container_width=True):
-        st.cache_data.clear()
-        st.rerun()
-
-    # Estado de la última actualización
-    st.sidebar.caption(f"🕐 Última: {datetime.now().strftime('%H:%M:%S')}")
-    st.sidebar.info("Auto-actualizando cada 30s", icon="🔄")
-
-    # Carga de datos
-    df_ultimos = get_ultimo_precio_por_gasolinera(db)
-
-    if df_ultimos.empty:
-        st.warning("⚠️ No hay datos disponibles. Ejecuta el scraper primero.")
-        return
+def render_dashboard(db, df_completo, df_ultimos, tipo_comb, municipio_sel, mostrar_baratos):
+    """Renderiza todo el contenido del dashboard."""
 
     # Filtrar por municipio
+    df_filtrado = df_ultimos.copy()
     if municipio_sel != "Todos":
-        df_ultimos = df_ultimos[df_ultimos["municipio"] == municipio_sel]
+        df_filtrado = df_filtrado[df_filtrado["municipio"] == municipio_sel]
 
     # Filtrar por precio (los más baratos)
-    if mostrar_baratos and not df_ultimos.empty:
+    if mostrar_baratos and not df_filtrado.empty:
         if tipo_comb == "Gasolina 95 (E5)":
-            df_ultimos = df_ultimos.nsmallest(5, "gasolina_95")
+            df_filtrado = df_filtrado.nsmallest(5, "gasolina_95")
         elif tipo_comb == "Diésel (B7)":
-            df_ultimos = df_ultimos.nsmallest(5, "diesel_b7")
+            df_filtrado = df_filtrado.nsmallest(5, "diesel_b7")
         else:
-            # Ambos: calcular precio promedio y ordenar
-            df_ultimos["precio_promedio"] = (
-                df_ultimos["gasolina_95"].fillna(0) +
-                df_ultimos["diesel_b7"].fillna(0)
+            df_filtrado["precio_promedio"] = (
+                df_filtrado["gasolina_95"].fillna(0) +
+                df_filtrado["diesel_b7"].fillna(0)
             ) / 2
-            df_ultimos = df_ultimos.nsmallest(5, "precio_promedio")
+            df_filtrado = df_filtrado.nsmallest(5, "precio_promedio")
 
     # Calcular estadísticas
-    stats = calcular_estadisticas(df_ultimos)
+    stats = calcular_estadisticas(df_filtrado)
 
     # SECCIÓN 1: Métricas principales
     st.header("📊 Resumen Actual")
@@ -240,10 +142,10 @@ def main():
     col1, col2, col3, col4 = st.columns(4)
 
     with col1:
-        if "gasolina_95" in df_ultimos.columns:
-            avg_95 = df_ultimos["gasolina_95"].mean()
-            min_95 = df_ultimos["gasolina_95"].min()
-            max_95 = df_ultimos["gasolina_95"].max()
+        if "gasolina_95" in df_filtrado.columns:
+            avg_95 = df_filtrado["gasolina_95"].mean()
+            min_95 = df_filtrado["gasolina_95"].min()
+            max_95 = df_filtrado["gasolina_95"].max()
             st.metric(
                 label="⛽ Gasolina 95",
                 value=f"{avg_95:.3f} €/L",
@@ -253,10 +155,10 @@ def main():
             st.metric("⛽ Gasolina 95", "N/A")
 
     with col2:
-        if "diesel_b7" in df_ultimos.columns:
-            avg_b7 = df_ultimos["diesel_b7"].mean()
-            min_b7 = df_ultimos["diesel_b7"].min()
-            max_b7 = df_ultimos["diesel_b7"].max()
+        if "diesel_b7" in df_filtrado.columns:
+            avg_b7 = df_filtrado["diesel_b7"].mean()
+            min_b7 = df_filtrado["diesel_b7"].min()
+            max_b7 = df_filtrado["diesel_b7"].max()
             st.metric(
                 label="🚛 Diésel B7",
                 value=f"{avg_b7:.3f} €/L",
@@ -268,30 +170,28 @@ def main():
     with col3:
         st.metric(
             label="🏢 Gasolineras",
-            value=len(df_ultimos),
+            value=len(df_filtrado),
             delta=f"en {municipio_sel}"
         )
 
     with col4:
-        # Calcular la más barata
-        if not df_ultimos.empty:
-            if tipo_comb == "Gasolina 95 (E5)" and "gasolina_95" in df_ultimos.columns:
-                mas_barata = df_ultimos.loc[df_ultimos["gasolina_95"].idxmin()]
+        if not df_filtrado.empty:
+            if tipo_comb == "Gasolina 95 (E5)" and "gasolina_95" in df_filtrado.columns:
+                mas_barata = df_filtrado.loc[df_filtrado["gasolina_95"].idxmin()]
                 st.metric(
                     label="💰 Más barata (95)",
                     value=mas_barata["nombre"][:15] + "..." if len(mas_barata["nombre"]) > 15 else mas_barata["nombre"],
                     delta=f"{mas_barata['gasolina_95']:.3f} €/L"
                 )
-            elif tipo_comb == "Diésel (B7)" and "diesel_b7" in df_ultimos.columns:
-                mas_barata = df_ultimos.loc[df_ultimos["diesel_b7"].idxmin()]
+            elif tipo_comb == "Diésel (B7)" and "diesel_b7" in df_filtrado.columns:
+                mas_barata = df_filtrado.loc[df_filtrado["diesel_b7"].idxmin()]
                 st.metric(
                     label="💰 Más barata (B7)",
                     value=mas_barata["nombre"][:15] + "..." if len(mas_barata["nombre"]) > 15 else mas_barata["nombre"],
                     delta=f"{mas_barata['diesel_b7']:.3f} €/L"
                 )
             else:
-                # Ambos combustibles
-                df_temp = df_ultimos.copy()
+                df_temp = df_filtrado.copy()
                 df_temp["promedio"] = (df_temp["gasolina_95"].fillna(999) + df_temp["diesel_b7"].fillna(999)) / 2
                 mas_barata = df_temp.loc[df_temp["promedio"].idxmin()]
                 st.metric(
@@ -305,21 +205,18 @@ def main():
     # SECCIÓN 2: Gráfico de barras comparativo
     st.header("📈 Comparativa de Precios por Gasolinera")
 
-    # Preparar datos para gráfico
-    df_melt = df_ultimos.melt(
+    df_melt = df_filtrado.melt(
         id_vars=["nombre", "municipio"],
         value_vars=["gasolina_95", "diesel_b7"],
         var_name="Tipo",
         value_name="Precio"
     ).dropna(subset=["Precio"])
 
-    # Mapeo de nombres
     df_melt["Tipo"] = df_melt["Tipo"].map({
         "gasolina_95": "⛽ Gasolina 95",
         "diesel_b7": "🚛 Diésel B7"
     })
 
-    # Crear gráfico de barras
     fig_barras = px.bar(
         df_melt,
         x="nombre",
@@ -345,12 +242,12 @@ def main():
 
     fig_barras.update_xaxes(tickangle=-45)
 
-    st.plotly_chart(fig_barras, use_container_width=True)
+    st.plotly_chart(fig_barras, use_container_width=True, key="barras")
 
     # SECCIÓN 3: Gráfico de dispersión (Scatter)
     st.header("🎯 Análisis de Relación Precio Gasolina/Diésel")
 
-    df_scatter = df_ultimos.dropna(subset=["gasolina_95", "diesel_b7"]).copy()
+    df_scatter = df_filtrado.dropna(subset=["gasolina_95", "diesel_b7"]).copy()
 
     if not df_scatter.empty:
         fig_scatter = px.scatter(
@@ -366,10 +263,9 @@ def main():
                 "diesel_b7": "Precio Diésel B7 (€/L)"
             },
             color="diesel_b7",
-            color_continuous_scale="RdYlGn_r"  # Rojo (caro) a Verde (barato)
+            color_continuous_scale="RdYlGn_r"
         )
 
-        # Añadir línea de tendencia
         fig_scatter.add_trace(
             go.Scatter(
                 x=df_scatter["gasolina_95"],
@@ -385,15 +281,14 @@ def main():
             hovermode="closest"
         )
 
-        st.plotly_chart(fig_scatter, use_container_width=True)
+        st.plotly_chart(fig_scatter, use_container_width=True, key="scatter")
     else:
         st.info("No hay datos completos para mostrar el análisis de relación.")
 
     # SECCIÓN 4: Mapa de calor (Heatmap)
     st.header("🔥 Mapa de Calor de Precios")
 
-    # Crear matriz para heatmap
-    df_heatmap = df_ultimos.set_index("nombre")[["gasolina_95", "diesel_b7"]].copy()
+    df_heatmap = df_filtrado.set_index("nombre")[["gasolina_95", "diesel_b7"]].copy()
     df_heatmap.columns = ["⛽ Gasolina 95", "🚛 Diésel B7"]
 
     if not df_heatmap.empty:
@@ -413,7 +308,7 @@ def main():
             height=max(300, len(df_heatmap) * 40)
         )
 
-        st.plotly_chart(fig_heatmap, use_container_width=True)
+        st.plotly_chart(fig_heatmap, use_container_width=True, key="heatmap")
 
     # SECCIÓN 5: Tabla de datos ordenada
     st.header("📋 Ranking de Precios")
@@ -421,8 +316,8 @@ def main():
     col_tab1, col_tab2 = st.tabs(["⛽ Gasolina 95", "🚛 Diésel B7"])
 
     with col_tab1:
-        if "gasolina_95" in df_ultimos.columns:
-            df_ranking_95 = df_ultimos[["nombre", "municipio", "gasolina_95"]].dropna(
+        if "gasolina_95" in df_filtrado.columns:
+            df_ranking_95 = df_filtrado[["nombre", "municipio", "gasolina_95"]].dropna(
                 subset=["gasolina_95"]
             ).sort_values("gasolina_95").reset_index(drop=True)
             df_ranking_95.index = df_ranking_95.index + 1
@@ -439,8 +334,8 @@ def main():
             st.info("No hay datos de gasolina 95.")
 
     with col_tab2:
-        if "diesel_b7" in df_ultimos.columns:
-            df_ranking_b7 = df_ultimos[["nombre", "municipio", "diesel_b7"]].dropna(
+        if "diesel_b7" in df_filtrado.columns:
+            df_ranking_b7 = df_filtrado[["nombre", "municipio", "diesel_b7"]].dropna(
                 subset=["diesel_b7"]
             ).sort_values("diesel_b7").reset_index(drop=True)
             df_ranking_b7.index = df_ranking_b7.index + 1
@@ -481,19 +376,110 @@ def main():
     # Footer
     st.markdown("---")
     st.caption(
-        f"Datos actualizados: {datetime.now().strftime('%d/%m/%Y %H:%M')} | "
+        f"Datos actualizados: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')} | "
         f"Fuente: Ministerio de Industria y Turismo"
     )
 
-    # Auto-refresh cada 30 segundos
-    if "last_refresh" not in st.session_state:
-        st.session_state.last_refresh = 0
 
-    import time
-    current_time = time.time()
-    if current_time - st.session_state.last_refresh >= 30:
-        st.session_state.last_refresh = current_time
+def main():
+    # Header con estilo
+    st.title("⛽ Dashboard de Precios de Combustible")
+    st.markdown("### 📍 Área de Alzira y alrededores")
+    st.markdown("---")
+
+    # Conexión a la base de datos
+    try:
+        db = get_database()
+    except Exception as e:
+        st.error(f"❌ Error de conexión: {e}")
+        return
+
+    # Sidebar
+    st.sidebar.header("🔍 Filtros")
+
+    # Selector de combustible
+    tipo_comb = st.sidebar.radio(
+        "Tipo de combustible",
+        ["Ambos", "Gasolina 95 (E5)", "Diésel (B7)"],
+        help="Selecciona el tipo de combustible a analizar"
+    )
+
+    # Selector de municipio (si hay datos)
+    df_completo = get_todos_los_datos(db)
+
+    if not df_completo.empty:
+        df_completo = df_completo[df_completo["municipio"] != "Alberic"]
+        municipios = sorted(df_completo["municipio"].dropna().unique())
+        municipio_sel = st.sidebar.selectbox(
+            "Municipio",
+            ["Todos"] + municipios
+        )
+
+        st.sidebar.markdown("### 📊 Rango de precios")
+        mostrar_baratos = st.sidebar.checkbox("Mostrar solo los más baratos", value=False)
+    else:
+        municipio_sel = "Todos"
+        mostrar_baratos = False
+
+    # Sección de gestión del scraper
+    st.sidebar.markdown("---")
+    st.sidebar.header("🤖 Gestión del Scraper")
+
+    # Botón para lanzar el scraper
+    if st.sidebar.button("🚀 Ejecutar scraper ahora", use_container_width=True, type="primary"):
+        hoy = datetime.now().date()
+        datos_hoy = df_completo[
+            pd.to_datetime(df_completo["timestamp"]).dt.date == hoy
+        ] if not df_completo.empty else pd.DataFrame()
+
+        if not datos_hoy.empty and len(datos_hoy) > 0:
+            st.sidebar.warning(
+                f"⚠️ Ya se ejecutó el scraper hoy ({len(datos_hoy)} registros). "
+                "¿Seguro que quieres volver a ejecutar?"
+            )
+            confirmar = st.sidebar.button("✅ Sí, ejecutar de todos modos", key="confirmar_scraper")
+        else:
+            confirmar = True
+
+        if confirmar:
+            with st.sidebar.spinner("⏳ Ejecutando scraper..."):
+                try:
+                    import subprocess
+                    result = subprocess.run(
+                        [sys.executable, "scraper.py", "--una-vez"],
+                        capture_output=True,
+                        text=True,
+                        timeout=120
+                    )
+                    if result.returncode == 0:
+                        st.sidebar.success("✅ Scraper ejecutado correctamente")
+                        st.cache_data.clear()
+                        st.rerun()
+                    else:
+                        st.sidebar.error(f"❌ Error: {result.stderr}")
+                except subprocess.TimeoutExpired:
+                    st.sidebar.error("⏰ Timeout: El scraper tardó más de 2 minutos")
+                except Exception as e:
+                    st.sidebar.error(f"❌ Error al ejecutar: {e}")
+
+    # Botón de refresh manual
+    if st.sidebar.button("🔄 Actualizar datos", use_container_width=True):
+        st.cache_data.clear()
         st.rerun()
+
+    # Estado de la última actualización
+    st.sidebar.caption(f"🕐 Última: {datetime.now().strftime('%H:%M:%S')}")
+    st.sidebar.info("Auto-actualizando cada 30s", icon="🔄")
+
+    # Carga de datos (se actualiza cada 30s gracias al ttl=30 del cache)
+    df_ultimos = get_ultimo_precio_por_gasolinera(db)
+
+    if df_ultimos.empty:
+        st.warning("⚠️ No hay datos disponibles. Ejecuta el scraper primero.")
+        return
+
+    # Renderizar el dashboard
+    render_dashboard(db, df_completo, df_ultimos, tipo_comb, municipio_sel, mostrar_baratos)
 
 
 if __name__ == "__main__":
